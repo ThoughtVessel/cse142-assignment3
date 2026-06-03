@@ -1,0 +1,2 @@
+Used llm to help download UV.
+For the scaled dot product function, I kept messing up the first multiplication and it took a long time to figure out I should only be multiplying the last two dimensins

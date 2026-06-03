@@ -24,14 +24,38 @@ class Linear(nn.Module):
     ``bias=False`` for all projections, so this is the common case).
     """
 
+    """
+    in_features = dimension of input features (only for init)
+    out_features = dimension of output features (only for init)
+    """
     def __init__(
         self, in_features: int, out_features: int, bias: bool = True
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement Linear.__init__()")
+
+        # Initialize weight (swapped order because of transpose)
+        self.weight = nn.Parameter(
+            torch.empty(out_features, in_features).uniform_(-1/math.sqrt(in_features), 1/math.sqrt(in_features))
+        )
+
+        # Add bias (if wanted)
+        if bias:
+            self.bias = nn.Parameter(torch.zeros(out_features))
+        else:
+            self.bias = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement Linear.forward()")
+        # Transpose and multiple
+        transposed_output = x @ self.weight.T
+
+        # Add bias (if not none)
+        if self.bias is not None:
+            bias_output = transposed_output + self.bias
+            return bias_output
+        else:
+            # Return non-biased output
+            return transposed_output
+        
 
 
 class Embedding(nn.Module):
@@ -42,10 +66,16 @@ class Embedding(nn.Module):
 
     def __init__(self, num_embeddings: int, embedding_dim: int) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement Embedding.__init__()")
+
+        # Initialize lookup table using randn for normal distribution 
+        # (dividing by 50 / multiplying by 0.02 shifts the standard deviation to 0.02)
+        self.weight = nn.Parameter(
+            torch.randn(num_embeddings, embedding_dim) * 0.02
+        )
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement Embedding.forward()")
+        # Use lookup table to return correct vector set
+        return self.weight[indices]
 
 
 class RMSNorm(nn.Module):
@@ -53,10 +83,26 @@ class RMSNorm(nn.Module):
 
     def __init__(self, d_model: int, eps: float = 1e-5) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement RMSNorm.__init__()")
+        # Save eps as a self variable
+        self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement RMSNorm.forward()")
+        # Square matrix
+        squared = x.square()
+
+        # Get mean (in last dimension)
+        average = squared.mean(dim=-1, keepdim=True)
+
+        # Add epsilon
+        epsiloned = average + self.eps
+
+        # Take square root
+        squirted = epsiloned.sqrt()
+
+        # Divide x by qurited
+        return x / squirted
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +190,24 @@ def scaled_dot_product_attention(
     Returns:
         ``(B, ..., T, d_v)``
     """
-    raise NotImplementedError("TODO: Implement scaled_dot_product_attention()")
+    # First transpose K and multiply with Q (using @ for matrix multiplication)
+    # We need to do the weird transpose of K because we want to do the dot product between the last dimension of Q and K, 
+    # and the last two dimensions of K are T and d_k, 
+    # so we need to swap them to get the correct shape for matrix multiplication.
+    QK_product = Q @ K.transpose(-2, -1)
+
+    # Divide by sqrt(d_k)
+    d_k = Q.shape[-1]
+    scaled_QK = QK_product / math.sqrt(d_k)
+
+    # Apply softmax (written by me)
+    if mask is not None:
+        normalized = softmax(scaled_QK + mask)
+    else:
+        normalized = softmax(scaled_QK)
+
+    # Multiply with V (suing @, not *)
+    return normalized @ V
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
