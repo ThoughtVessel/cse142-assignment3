@@ -236,7 +236,21 @@ class CausalMultiHeadSelfAttention(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement CausalMultiHeadSelfAttention.__init__()")
+
+        # Assertions
+        assert d_model % n_heads == 0
+        assert (d_model // n_heads) % 2 == 0
+
+        # Retain useful variables
+        self.d_model = d_model
+        self.n_heads = n_heads
+        
+        # Set selfs
+        self.qkv_proj = Linear(d_model, 3 * d_model, bias=False)
+        self.o_proj   = Linear(d_model, d_model, bias=False)
+        self.rope = RotaryPositionEmbedding(d_model // n_heads)
+        self.dropout = nn.Dropout(dropout)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -245,7 +259,42 @@ class CausalMultiHeadSelfAttention(nn.Module):
         Returns:
             ``(B, T, d_model)``
         """
-        raise NotImplementedError("TODO: Implement CausalMultiHeadSelfAttention.forward()")
+        # Get B and T
+        B = x.shape[0]
+        T = x.shape[1]
+
+        # Apply fused projection: (B, T, 3*d_model)
+        qkv = self.qkv_proj(x)   
+        
+        # Generate Q, K, and V: (B, T, d_model)
+        Q, K, V = (qkv).split(self.d_model, dim=-1)
+
+        # Reshape Q, K, V (have to use view in the wrong direction then correct)
+        Q = Q.view(B, T, self.n_heads, (self.d_model // self.n_heads))
+        Q = Q.transpose(1, 2)
+        K = K.view(B, T, self.n_heads, (self.d_model // self.n_heads))
+        K = K.transpose(1, 2)
+        V = V.view(B, T, self.n_heads, (self.d_model // self.n_heads))
+        V = V.transpose(1, 2)
+
+        # Apply RoPE to Q and K
+        Q, K = self.rope(Q, K)
+
+        # Build an additive causal mask (−10^9 above the diagonal)
+        mask = torch.triu(torch.ones(T, T), diagonal=1)
+        mask = mask * -1e9
+
+        # Compute scaled dot-product attention
+        sdpa = scaled_dot_product_attention(Q, K, V, mask)
+
+        # Concatenate heads back to (𝐵,𝑇,𝑑model) (reverse the annoying transpose and view from earlier)
+        concatonate = sdpa.transpose(1, 2).reshape(B, T, self.d_model)
+
+        # Apply the output projection, then dropout before the residual add in the block
+        out = self.o_proj(concatonate)
+
+        return self.dropout(out)
+
 
 
 # ---------------------------------------------------------------------------
@@ -273,11 +322,30 @@ class FeedForward(nn.Module):
         self, d_model: int, d_ff: int, dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement FeedForward.__init__()")
+        
+        # Create required attributes
+        self.w_gate = Linear(d_model, d_ff, bias=False)
+        self.w_up = Linear(d_model, d_ff, bias=False)
+        self.w_down = Linear(d_ff, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement FeedForward.forward()")
+        ####### Pass through all steps in feed forward
+        ## Apply silu to w_gate(x)
+        w_gate_x = self.w_gate(x)
+        silu_output = silu(w_gate_x)
 
+        ## Get w_up value
+        w_up_x = self.w_up(x)
+
+        ## Do element wise multiplication (⊙)
+        element_wise = silu_output * w_up_x
+
+        ## Feed into w_down
+        w_down_x = self.w_down(element_wise)
+
+        ## Apply dropout
+        return self.dropout(w_down_x)
 
 # ---------------------------------------------------------------------------
 # Transformer block and full LM
@@ -313,10 +381,22 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement TransformerBlock.__init__()")
+        
+        ###### Add Required Attributes
+        ## RMSNorm Layers
+        self.ln1 = RMSNorm(d_model)
+        self.ln2 = RMSNorm(d_model)
+        ## Attention and Feed forward layers
+        self.attn = CausalMultiHeadSelfAttention(d_model, n_heads, dropout=dropout)
+        self.ffn = FeedForward(d_model, d_ff, dropout=dropout)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement TransformerBlock.forward()")
+        # Apply to the xes (and oh oh oh they want me!!!!)
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
+        
 
 
 class TransformerLM(nn.Module):
@@ -360,7 +440,29 @@ class TransformerLM(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement TransformerLM.__init__()")
+        
+        ####### Its all coming together https://a.pinatafarm.com/500x277/4bd38b530e/its-all-coming-together.jpg
+        ## Toke Embedding
+        self.token_emb = Embedding(vocab_size, d_model)
+        ## Blocks (using list comprehension to create the correct number of blocks)
+        self.blocks = nn.ModuleList([
+            TransformerBlock(d_model, n_heads, d_ff, dropout)
+            for _ in range(n_layers)
+        ])
+        ## Final Layer Norm and LM head
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size, bias=False)
+        ## Store context length
+        self.context_length = context_length
+
+        # Fix the zero-init error (as laid out in the pdf)
+        for block in self.blocks:
+            block.attn.o_proj.weight.data.zero_()
+            block.ffn.w_down.weight.data.zero_()
+
+        # Weight tying (as laid out in the pdf)
+        self.lm_head.weight = self.token_emb.weight
+
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -369,4 +471,20 @@ class TransformerLM(nn.Module):
         Returns:
             ``(B, T, vocab_size)`` raw logits.
         """
-        raise NotImplementedError("TODO: Implement TransformerLM.forward()")
+
+        ######## Begin the TRANSFORMATION
+        ## Assert correct length
+        assert input_ids.shape[1] <= self.context_length
+
+        ## Get the token embedding
+        x = self.token_emb(input_ids)
+
+        ## Pass into blocks
+        for block in self.blocks:
+            x = block(x)
+
+        ## Pass into ln_final
+        x = self.ln_final(x)
+
+        ## Pass into lm_head
+        return self.lm_head(x)

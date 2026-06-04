@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL: Always use `uv run`
+
+**Never use `python3` or `python` directly.** Always prefix with `uv run`:
+
+- Wrong: `python3 -m pytest tests/`
+- Right: `uv run python -m pytest tests/`
+
+Running bare `python3` will fail immediately (modules not found).
+
 ## Assignment Overview
 
 CSE 142 Spring 2026 — Build a decoder-only transformer language model from scratch on the TinyStories dataset. Five parts graded by unit tests and a staff retrain. **Due: 6/5/2026.**
@@ -18,9 +27,11 @@ Do **not** modify anything in `tests/`, `scripts/`, or any other file.
 
 ## Commands
 
+> **Run all commands with `uv run` instead of `python3` directly.** e.g. `uv run python -m pytest ...`
+
 ```bash
 # One-time data setup
-PYTHONPATH=. python scripts/prepare_data.py
+PYTHONPATH=. uv run python scripts/prepare_data.py
 
 # Run all tests
 PYTHONPATH=. python3 -m pytest tests/ -x -q
