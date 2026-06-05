@@ -1,2 +1,6 @@
 Used llm to help download UV.
 For the scaled dot product function, I kept messing up the first multiplication and it took a long time to figure out I should only be multiplying the last two dimensins
+For the BPE
+- Couldn't remember how to open a file
+- Used to figure out how sorted handles ties
+- Claude suggested writing a helper function for encode
