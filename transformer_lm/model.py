@@ -281,7 +281,7 @@ class CausalMultiHeadSelfAttention(nn.Module):
         Q, K = self.rope(Q, K)
 
         # Build an additive causal mask (−10^9 above the diagonal)
-        mask = torch.triu(torch.ones(T, T), diagonal=1)
+        mask = torch.triu(torch.ones(T, T, device=x.device, dtype=x.dtype), diagonal=1)
         mask = mask * -1e9
 
         # Compute scaled dot-product attention
