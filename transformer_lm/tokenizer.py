@@ -115,64 +115,100 @@ class BPETokenizer:
         # Save vocab, merges, special tokens for later.
         self.vocab = vocab
         self.merges = merges
-        self.special_tokens = special_tokens or []
-
-        # Build mapping from special token string -> its ID
-        self.special_token_ids = {}
-        for token in self.special_tokens:
-            token_bytes = token.encode("utf-8")
-            for id, b in vocab.items():
-                if b == token_bytes:
-                    self.special_token_ids[token] = id
-                    break
-
-        # Sort special tokens longest-first for greedy matching
-        self.sorted_special = sorted(self.special_tokens, key=len, reverse=True)
-
-    def _bpe_encode(self, text: str) -> list[int]:
-        """Apply BPE to a plain text segment (no special tokens)."""
-        # Convert to list
-        content = list(text.encode("utf-8"))
-
-        # When merging we find correct new id with merges[0] = vocab 256, etc
-        for i in range(len(self.merges)):
-            tempcontent = []
-            byte1 = self.merges[i][0]
-            byte2 = self.merges[i][1]
-            k = 0
-            while k < len(content):
-                if k < len(content) - 1 and content[k] == byte1 and content[k + 1] == byte2:
-                    tempcontent.append(256 + i)
-                    k += 2
-                else:
-                    tempcontent.append(content[k])
-                    k += 1
-            content = tempcontent
-        return content
+        self.special_tokens = special_tokens
 
     def encode(self, text: str) -> list[int]:
         """Encode a string into a list of token IDs."""
-        ids = []
-        i = 0
-        while i < len(text):
-            # Try to match a special token at position i (longest first)
-            matched = False
-            for special in self.sorted_special:
-                if text[i:i + len(special)] == special:
-                    ids.append(self.special_token_ids[special])
-                    i += len(special)
-                    matched = True
-                    break
-            if not matched:
-                # Collect text up to the next special token boundary
-                j = i + 1
-                while j < len(text):
-                    if any(text[j:j + len(s)] == s for s in self.sorted_special):
-                        break
-                    j += 1
-                ids.extend(self._bpe_encode(text[i:j]))
-                i = j
-        return ids
+        # Variable to store special tokens and normal strings divided but in order
+        divided_string_locations = []
+        sc_ids = []
+
+        # First check to make sure that special tokens exists
+        if self.special_tokens is not None:
+
+            # If it does exist, go through every letter in the text
+            for i in range(len(text)):
+
+                # For every letter, go through every special character
+                for j in range(len(self.special_tokens)):
+
+                    # Make sure the special character isn't longer than the remaining text
+                    st_length = len(self.special_tokens[j])
+                    if st_length <= (len(text) - i):
+
+                        # If its the token, add its vocab integer id to the list
+                        if text[i : i + st_length] == self.special_tokens[j]:
+                            sc_ids.append(len(self.vocab) - len(self.special_tokens) + j)
+                            divided_string_locations.append((i, i + st_length))
+
+
+        # Now we have the special token locations and ids, we can add the normal text in between
+        normal_string_locations = []
+
+        # If there are no special characters found, then just keep entire list
+        if len(divided_string_locations) == 0:
+            normal_string_locations.append((0, len(text)))
+        else:
+            # If they are found, first check if they are the first or not
+            if divided_string_locations[0][0] > 0:
+                normal_string_locations.append((0, divided_string_locations[0][0]))
+
+            # Use the data gathered from analyzing the special characters, to recaclulate the stops and starts of the normal words
+            for i in range(len(divided_string_locations) - 1):
+                normal_string_locations.append((divided_string_locations[i][1], divided_string_locations[i + 1][0]))
+
+            # Need to correct if its the last token
+            if divided_string_locations[-1][1] < len(text):
+                normal_string_locations.append((divided_string_locations[-1][1], len(text)))
+
+        
+        # Now, use the normal string locations to get the strings from the text
+        normal_strings = []
+        for start, end in normal_string_locations:
+            normal_strings.append(text[start:end])
+        
+        # Convert to list of integer values for the normal strings
+        content = []
+        for string in normal_strings:
+            content.append(list(string.encode("utf-8")))
+
+        
+        # Loop and merge for evvery one of the normal string, then add the special characters back in
+        merged_results = []
+        for content_string in content:
+            # Add the correct new id when merging (from UTF)
+            for i in range(len(self.merges)):
+                tempcontent = []
+                byte1 = self.merges[i][0]
+                byte2 = self.merges[i][1]
+                k = 0
+                while k < len(content_string):
+                    if k < len(content_string) - 1 and content_string[k] == byte1 and content_string[k + 1] == byte2:
+                        tempcontent.append(256 + i)
+                        k += 2
+                    else:
+                        tempcontent.append(content_string[k])
+                        k += 1
+                content_string = tempcontent
+            # Save the merged result for normal string
+            merged_results.append(content_string)
+
+        # Use the divided and normal string locations to add the special characters and normal strings back together in order
+        segments = []
+
+        for idx, (start, end) in enumerate(divided_string_locations):
+            segments.append((start, [sc_ids[idx]]))
+
+        for idx, (start, end) in enumerate(normal_string_locations):
+            segments.append((start, merged_results[idx]))
+
+        segments.sort(key=lambda x: x[0])
+
+        # Flatten into final result list
+        result = []
+        for _, tokens in segments:
+            result.extend(tokens)
+        return result
 
     def decode(self, ids: list[int]) -> str:
         """Decode a list of token IDs back into a string."""
