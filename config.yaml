@@ -6,16 +6,16 @@
 
 # Architecture (tunable — must satisfy constraints in assignment.pdf)
 d_model: 64
-n_layers: 5
+n_layers: 10
 n_heads: 4
-d_ff: 256
+d_ff: 128
 dropout: 0.0
 
 # Training
-batch_size: 32
-learning_rate: 0.001
+batch_size: 256
+learning_rate: 0.02
 min_lr: 0.00001
-warmup_steps: 200
+warmup_steps: 400
 weight_decay: 0.1
 gradient_clip_norm: 1.0
 beta1: 0.9
