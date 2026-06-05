@@ -81,7 +81,7 @@ def cross_entropy_loss(
     # Apply max and subtract
     pre_final_sum_values = logits.max(dim=-1).values + logged_values - indexed_logits
 
-    # Sum over all values (no dimensions needed because we need a 0 dimensional scalar output)
+    # Sum over all values (no dimensions needed because we only need a 0 dimensional scalar output)
     final_sum = pre_final_sum_values.sum()
 
     # Divide by B and T dimension sizes to get average
