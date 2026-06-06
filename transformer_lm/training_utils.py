@@ -85,7 +85,8 @@ def generate(
         loop_prompt = prompt[-context_length:]
 
         # Generate new token with model
-        input_tensor = torch.tensor([loop_prompt])
+        device = next(model.parameters()).device
+        input_tensor = torch.tensor([loop_prompt], device=device)
         model_output = model(input_tensor)
         last_token_output = model_output[:, -1, :]
 
